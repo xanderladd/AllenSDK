@@ -34,10 +34,10 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 from allensdk.api.queries.rma_template import RmaTemplate
-from allensdk.api.warehouse_cache.cache import cacheable
+# from allensdk.api.cache import cacheable
 import os
 import simplejson as json
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from allensdk.config.manifest import Manifest
 
 
@@ -70,11 +70,9 @@ class BiophysicalApi(RmaTemplate):
         self.model_type = None
 
 
-    @cacheable()
     def get_neuronal_models(self, specimen_ids, num_rows='all', count=False, model_type_ids=None, **kwargs):
         '''Fetch all of the biophysically detailed model records associated with 
         a particular specimen_id
-
         Parameters
         ----------
         specimen_ids : list
@@ -86,7 +84,6 @@ class BiophysicalApi(RmaTemplate):
         model_type_ids : list, optional
             One or more integer ids identifying categories of neuronal model. Defaults 
             to all-active and perisomatic biophysical_models.
-
         Returns
         -------
         List of dict
@@ -107,14 +104,12 @@ class BiophysicalApi(RmaTemplate):
 
     def build_rma(self, neuronal_model_id, fmt='json'):
         '''Construct a query to find all files related to a neuronal model.
-
         Parameters
         ----------
         neuronal_model_id : integer or string representation
             key of experiment to retrieve.
         fmt : string, optional
             json (default) or xml
-
         Returns
         -------
         string
@@ -143,12 +138,10 @@ class BiophysicalApi(RmaTemplate):
     def read_json(self, json_parsed_data):
         '''Get the list of well_known_file ids from a response body
         containing nested sample,microarray_slides,well_known_files.
-
         Parameters
         ----------
         json_parsed_data : dict
            Response from the Allen Institute Api RMA.
-
         Returns
         -------
         list of strings
@@ -215,22 +208,23 @@ class BiophysicalApi(RmaTemplate):
                                         self.ids['stimulus'][str(well_known_file['id'])] = \
                                             "%d.nwb" % (ephys_result['id'])
 
-                    self.sweeps = [sweep['sweep_number']
-                                   for sweep in specimen['ephys_sweeps']
+                    sweep_entries = [sweep for sweep in specimen['ephys_sweeps']
                                    if sweep['stimulus_name'] != 'Test']
+                    self.sweeps = [sweep['sweep_number'] for sweep in sweep_entries]
+                    self.sweeps_by_type = defaultdict(list)
+                    for sweep in sweep_entries:
+                        self.sweeps_by_type[sweep['stimulus_name']].append(sweep['sweep_number'])
 
         return self.ids
-
+        
     def is_well_known_file_type(self, wkf, name):
         '''Check if a structure has the expected name.
-
         Parameters
         ----------
         wkf : dict
             A well-known-file structure with nested type information.
         name : string
             The expected type name
-
         See Also
         --------
         read_json: where this helper function is used.
@@ -243,7 +237,6 @@ class BiophysicalApi(RmaTemplate):
     def get_well_known_file_ids(self, neuronal_model_id):
         '''Query the current RMA endpoint with a neuronal_model id
         to get the corresponding well known file ids.
-
         Returns
         -------
         list
@@ -260,10 +253,10 @@ class BiophysicalApi(RmaTemplate):
                         stimulus_filename='',
                         swc_morphology_path='',
                         marker_path='',
-                        sweeps=[]):
+                        sweeps=[],
+                        sweeps_by_type={}):
         '''Generate a json configuration file with parameters for a
         a biophysical experiment.
-
         Parameters
         ----------
         fit_path : string
@@ -281,7 +274,8 @@ class BiophysicalApi(RmaTemplate):
             'model_type': model_type
         }]
         self.manifest['runs'] = [{
-            'sweeps': sweeps
+            'sweeps': sweeps,
+            'sweeps_by_type': sweeps_by_type,
         }]
         self.manifest['neuron'] = [{
             'hoc': ['stdgui.hoc', 'import3d.hoc']
@@ -333,7 +327,6 @@ class BiophysicalApi(RmaTemplate):
                    working_directory=None):
         '''Take a an experiment id, query the Api RMA to get well-known-files
         download the files, and store them in the working directory.
-
         Parameters
         ----------
         neuronal_model_id : int or string representation
@@ -383,7 +376,8 @@ class BiophysicalApi(RmaTemplate):
                              stimulus_filename,
                              swc_morphology_path,
                              marker_path,
-                             sweeps)
+                             sweeps,
+                             self.sweeps_by_type)
 
         manifest_path = os.path.join(working_directory, 'manifest.json')
         with open(manifest_path, 'w') as f:

@@ -143,7 +143,6 @@ class NwbDataSet(object):
 
             assert sweep_index_range[0] == 0, Exception(
                 "index range of the full sweep does not start at 0.")
-
             return {
                 'stimulus': stimulus,
                 'response': response,
@@ -152,6 +151,8 @@ class NwbDataSet(object):
                 'sampling_rate': 1.0 * swp['stimulus']['timeseries'][
                     'starting_time'].attrs['rate']
             }
+        
+            
 
     def set_sweep(self, sweep_number, stimulus, response):
         """ Overwrite the stimulus or response of an NWB file.

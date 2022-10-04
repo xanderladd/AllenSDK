@@ -37,7 +37,7 @@ import logging
 import os
 from ..biophys_sim.neuron.hoc_utils import HocUtils
 from allensdk.core.nwb_data_set import NwbDataSet
-from fractions import gcd
+from math import gcd
 from skimage.measure import block_reduce
 import scipy.interpolate
 import numpy as np
@@ -137,7 +137,6 @@ class Utils(HocUtils):
             Path to swc.
         '''
         h = self.h
-
         swc = self.h.Import3d_SWC_read()
         swc.input(morph_filename)
         imprt = self.h.Import3d_GUI(swc, 0)
@@ -159,12 +158,120 @@ class Utils(HocUtils):
         h.axon[1].connect(h.axon[0], 1.0, 0.0)
 
         h.define_shape()
+        
+    def load_passive_parameters(self,passive):
+        '''Configure a neuron after the cell morphology has been loaded.'''
+        conditions = self.description.data['conditions'][0]
+        genome = self.description.data['genome']
+        # print('genome', genome)
+        # print('conditions', conditions)
+        h = self.h
+
+        h("access soma")
+
+        # Set fixed passive properties
+        for sec in h.allsec():
+            sec.Ra = passive['ra']
+            sec.insert('pas')
+            for seg in sec:
+                seg.pas.e = passive["e_pas"]
+        
+        for c in passive["cm"]:
+            h('forsec "' + c["section"] + '" { cm = %g }' % c["cm"])
+        
+         # Insert channels and set parameters
+        for p in genome:
+            if p["section"] == "glob":  # global parameter
+                h(p["name"] + " = %g " % p["value"])
+            else:
+                if p["mechanism"] != "":
+                    h('forsec "' + p["section"] +
+                      '" { insert ' + p["mechanism"] + ' }')
+                h('forsec "' + p["section"] +
+                  '" { ' + p["name"] + ' = %g }' % p["value"])
+        # Set reversal potentials
+        for erev in conditions['erev']:
+            h('forsec "' + erev["section"] + '" { ek = %g }' % erev["ek"])
+            h('forsec "' + erev["section"] + '" { ena = %g }' % erev["ena"])
+
+   
+    def load_parameters(self,params=[]):
+        '''Configure a neuron after the cell morphology has been loaded.'''
+        passive = self.description.data['passive'][0]
+        
+        # use this for senstivity!!!
+        # if len(params):
+        #     genome = params
+        # else:
+        #     genome = self.description.data['genome']
+        
+        # use this for compare
+        genome = self.description.data['genome']
+        
+        
+        
+        # for idx,param in enumerate(params):
+        #     # print(genome[idx]['value'], param)
+        #     genome[idx]['value'] = param
+        
+        conditions = self.description.data['conditions'][0]
+        # print('genome', genome)
+        # print('conditions', conditions)
+        # print('passive', passive)
+        h = self.h
+
+        h("access soma")
+
+        # Set fixed passive properties
+        for sec in h.allsec():
+            sec.Ra = passive['ra']
+            sec.insert('pas')
+            for seg in sec:
+                seg.pas.e = passive["e_pas"]
+
+        for c in passive["cm"]:
+            h('forsec "' + c["section"] + '" { cm = %g }' % c["cm"])
+        
+        # Use this for regular compare
+        # # Insert channels and set parameters
+        for i,p in enumerate(genome):
+            # print(params[i], 'params', i, p["name"])
+            if p["section"] == "glob":  # global parameter
+                h(p["name"] + " = %g " % params[i])
+            else:
+                if p["mechanism"] != "":
+                    h('forsec "' + p["section"] +
+                      '" { insert ' + p["mechanism"] + ' }')
+                h('forsec "' + p["section"] +
+                  '" { ' + p["name"] + ' = %g }' % params[i])
+                
+        # NOTE: use this for sensitivity 
+         # Insert channels and set parameters
+        # for p in genome:
+        #     # print(p, 'params')
+        #     if p["section"] == "glob":  # global parameter
+        #         h(p["name"] + " = %g " % p["value"])
+        #     else:
+        #         if p["mechanism"] != "":
+        #             h('forsec "' + p["section"] +
+        #               '" { insert ' + p["mechanism"] + ' }')
+        #         h('forsec "' + p["section"] +
+        #           '" { ' + p["name"] + ' = %g }' % p["value"])
+
+        # Set reversal potentials
+        for erev in conditions['erev']:
+            h('forsec "' + erev["section"] + '" { ek = %g }' % erev["ek"])
+            h('forsec "' + erev["section"] + '" { ena = %g }' % erev["ena"])
+
 
     def load_cell_parameters(self):
         '''Configure a neuron after the cell morphology has been loaded.'''
         passive = self.description.data['passive'][0]
         genome = self.description.data['genome']
         conditions = self.description.data['conditions'][0]
+        # print('passive', passive)
+        # print('genome', genome)
+        # print('conditions', conditions)
         h = self.h
 
         h("access soma")
@@ -195,9 +302,81 @@ class Utils(HocUtils):
             h('forsec "' + erev["section"] + '" { ek = %g }' % erev["ek"])
             h('forsec "' + erev["section"] + '" { ena = %g }' % erev["ena"])
 
+    def setup_iclamp2(self,
+                     stimulus_path,
+                     sweep=0, stim=[], dt=0, v_init=0):
+        '''Assign a current waveform as input stimulus.
+
+        Parameters
+        ----------
+        stimulus_path : string
+            NWB file name
+        '''
+        if v_init:
+            self.h.v_init = v_init
+            
+        self.stim = self.h.IClamp(self.h.soma[0](0.5))
+        self.stim.amp = 0
+        self.stim.delay = 0
+        # just set to be really big; doesn't need to match the waveform
+        self.stim.dur = 1e12
+        # self.stim_curr = stim
+        stimulus_data = NwbDataSet(stimulus_path)
+        if sweep > 100:
+            sweep_data = stimulus_data.get_sweep(sweep // 10)
+            sweep_break_index = sweep % 10
+            initial_ind = 150000
+            noise_ind_1 = [initial_ind, 1300000]
+            noise_ind_2 = [1800000, 2800000]
+            noise_ind_3 = [3400000, 4400000]
+
+            if sweep_break_index == 1:
+                sweep_data['stimulus'] = sweep_data['stimulus'][noise_ind_1[0]: noise_ind_1[1]]
+            elif sweep_break_index == 2:
+                sweep_data['stimulus'] = sweep_data['stimulus'][noise_ind_2[0]: noise_ind_2[1]]
+            elif sweep_break_index == 3:
+                sweep_data['stimulus'] = sweep_data['stimulus'][noise_ind_3[0]: noise_ind_3[1]]
+                
+            rate = int(len(sweep_data['stimulus']) / 30000)
+            new_sampling_rate = sweep_data['sampling_rate'] / rate
+            
+        else:
+            sweep_data = stimulus_data.get_sweep(sweep)
+            rate = int(len(sweep_data['stimulus']) / 30000)
+            new_sampling_rate = sweep_data['sampling_rate'] / rate
+       
+        
+
+        
+        # sweep_data['stimulus'] = self.downsample(sweep_data['stimulus'],30000,30000)
+        self.stim_curr = stim[:] # sweep_data['stimulus'] * 1e9
+        # print(len(self.stim_curr ))
+        # convert to nA for NEURON
+        # import matplotlib.pyplot as plt
+        # plt.plot(self.stim_curr)
+        # plt.savefig('tst2.png')
+        # plt.close()
+
+
+        self.stimulus_sampling_rate = 1/dt * 1000 #new_sampling_rate#1/dt * 1000
+        self.simulation_sampling_rate =  1/dt * 1000 #new_sampling_rate #1/dt * 1000
+        simulation_dt = 1.0e3 / self.simulation_sampling_rate
+        stimulus_dt = 1.0e3 / self.stimulus_sampling_rate
+        # print("Using simulation dt %f, stimulus dt %f", simulation_dt, stimulus_dt)
+        
+        # self._log.debug("Using simulation dt %f, stimulus dt %f", simulation_dt, stimulus_dt)
+        self.h.dt = dt#simulation_dt
+        stim_vec = self.h.Vector(self.stim_curr)
+        stim_vec.play(self.stim._ref_amp, dt)
+
+        stimulus_stop_index = len(self.stim_curr) - 1
+        self.h.tstop = stimulus_stop_index * stimulus_dt
+        self.stim_vec_list.append(stim_vec)
+        
+        
     def setup_iclamp(self,
                      stimulus_path,
-                     sweep=0):
+                     sweep=0, stim_len=0):
         '''Assign a current waveform as input stimulus.
 
         Parameters
@@ -211,11 +390,13 @@ class Utils(HocUtils):
         # just set to be really big; doesn't need to match the waveform
         self.stim.dur = 1e12
 
-        self.read_stimulus(stimulus_path, sweep=sweep)
+        self.read_stimulus(stimulus_path, sweep=sweep, stim_len=stim_len)
 
         # NEURON's dt is in milliseconds
         simulation_dt = 1.0e3 / self.simulation_sampling_rate
         stimulus_dt = 1.0e3 / self.stimulus_sampling_rate
+        # print("Using simulation dt %f, stimulus dt %f", simulation_dt, stimulus_dt)
+        
         self._log.debug("Using simulation dt %f, stimulus dt %f", simulation_dt, stimulus_dt)
 
         self.h.dt = simulation_dt
@@ -226,7 +407,19 @@ class Utils(HocUtils):
         self.h.tstop = stimulus_stop_index * stimulus_dt
         self.stim_vec_list.append(stim_vec)
 
-    def read_stimulus(self, stimulus_path, sweep=0):
+    @staticmethod
+    def downsample(stim,neuron_hz,target_len):
+        sample_factor = int(len(stim) / target_len)
+        if sample_factor < 1:
+            return stim, neuron_hz
+        stim = stim[::sample_factor]
+        stim = stim[:target_len]
+        return stim
+    
+    
+
+        
+    def read_stimulus(self, stimulus_path, sweep=0, stim_len=0):
         '''Load current values for a specific experiment sweep and setup simulation
         and stimulus sampling rates.
 
@@ -245,9 +438,8 @@ class Utils(HocUtils):
             "reading stimulus path: %s, sweep %s",
             stimulus_path,
             sweep)
-
         stimulus_data = NwbDataSet(stimulus_path)
-        sweep_data = stimulus_data.get_sweep(sweep)
+        sweep_data = stimulus_data.get_sweep(sweep)        
 
         # convert to nA for NEURON
         self.stim_curr = sweep_data['stimulus'] * 1.0e9
@@ -255,7 +447,6 @@ class Utils(HocUtils):
         # convert from Hz
         hz = int(sweep_data['sampling_rate'])
         neuron_hz = Utils.nearest_neuron_sampling_rate(hz)
-
         self.simulation_sampling_rate = neuron_hz
         self.stimulus_sampling_rate = hz
 
@@ -293,8 +484,7 @@ class Utils(HocUtils):
         t = np.array(vec["t"])
 
         if self.stimulus_sampling_rate < self.simulation_sampling_rate:
-            factor = self.simulation_sampling_rate / self.stimulus_sampling_rate
-                
+            factor = int(self.simulation_sampling_rate / self.stimulus_sampling_rate)
             Utils._log.debug("subsampling recorded traces by %dX", factor)
             v = block_reduce(v, (factor,), np.mean)[:len(self.stim_curr)]
             t = block_reduce(t, (factor,), np.min)[:len(self.stim_curr)]

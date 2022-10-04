@@ -55,7 +55,7 @@ def _init_lock(lock):
     global _lock
     _lock = lock
 
-def run(args, sweeps=None, procs=6):
+def run(args, sweeps=None, procs=60):
     '''Main function for simulating sweeps in a biophysical experiment.
 
     Parameters
@@ -67,11 +67,13 @@ def run(args, sweeps=None, procs=6):
     sweeps : list
         list of experiment sweep numbers to simulate.  If None, simulate all sweeps.
     '''
-
     description = load_description(args)
     
     prepare_nwb_output(description.manifest.get_path('stimulus_path'),
                        description.manifest.get_path('output_path'))
+    
+    # run_sync(description, sweeps)
+    # print(1/0)
 
     if procs == 1:
         run_sync(description, sweeps)
@@ -119,7 +121,6 @@ def run_sync(description, sweeps=None):
     sweeps_by_type = run_params['sweeps_by_type']
 
     output_path = manifest.get_path("output_path")
-
     # run sweeps
     for sweep in sweeps:
         _runner_log.info("Loading sweep: %d" % (sweep))
@@ -128,12 +129,14 @@ def run_sync(description, sweeps=None):
         _runner_log.info("Simulating sweep: %d" % (sweep))
         vec = utils.record_values()
         tstart = time.time()
+        print("Simulating sweep: %d" % (sweep))
         h.finitialize()
         h.run()
         tstop = time.time()
         _runner_log.info("Time: %f" % (tstop - tstart))
 
         # write to an NWB File
+        print("Writing sweep: %d" % (sweep))
         _runner_log.info("Writing sweep: %d" % (sweep))
         recorded_data = utils.get_recorded_data(vec)
 
@@ -214,7 +217,6 @@ def load_description(args_dict):
         Object with all information needed to run the experiment.
     '''
     manifest_json_path = args_dict['manifest_file']
-    
     description = Config().load(manifest_json_path)
     
     # For newest all-active models update the axon replacement
